@@ -221,16 +221,10 @@ def render_listening_panel() -> None:
         return
 
     elapsed = time.monotonic() - started_at
-    if elapsed >= 10:
-        st.session_state.standby_audio = synthesize_speech(TIMEOUT_STANDBY)
-        st.session_state.listening_started_at = None
-        st.session_state.app_state = "STANDBY"
-        st.rerun()
-
     if elapsed >= 3 and not st.session_state.prompted:
         st.session_state.prompted = True
         st.session_state.prompt_audio = synthesize_speech(TIMEOUT_PROMPT)
-        st.rerun()
+        st.rerun(scope="app")
 
     if st.session_state.prompted:
         st.markdown('<div class="caption">말씀하세요.</div>', unsafe_allow_html=True)
@@ -238,7 +232,7 @@ def render_listening_panel() -> None:
         if st.session_state.tts_error:
             st.warning(st.session_state.tts_error)
     else:
-        st.markdown('<div class="caption">듣고 있어요.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="caption">잠시 후 말씀해 주세요.</div>', unsafe_allow_html=True)
 
 initialize_state()
 seoul_timezone = datetime.timezone(datetime.timedelta(hours=9))
@@ -332,26 +326,35 @@ if (
 
 if st.session_state.app_state == "LISTENING":
     render_listening_panel()
-    recording = st.audio_input(
-        "마이크 아이콘을 누르고 Chrome의 마이크 권한 요청에서 허용을 선택하세요. "
-        "말씀을 마치면 정지 버튼을 눌러 주세요.",
-        key=f"audio_input_{st.session_state.audio_sequence}",
-    )
-    if recording is not None:
-        audio_bytes = recording.getvalue()
-        audio_hash = hashlib.sha256(audio_bytes).hexdigest()
-        if audio_hash != st.session_state.last_processed_audio:
-            st.session_state.last_processed_audio = audio_hash
-            st.session_state.app_state = "RESPONDING"
-            with st.spinner("말씀을 듣고 답변을 준비하고 있어요."):
-                try:
-                    process_recording(audio_bytes)
-                except APIError:
-                    LOGGER.exception("Groq request failed")
-                    st.session_state.error_message = (
-                        "AI 서비스에 연결하지 못했습니다. API 키와 네트워크를 확인해 주세요."
-                    )
-                    st.session_state.app_state = "ERROR"
+    if st.session_state.prompted:
+        recording = st.audio_input(
+            "마이크 아이콘을 누르고 Chrome의 마이크 권한 요청에서 허용을 선택하세요. "
+            "말씀을 마치면 정지 버튼을 눌러 주세요.",
+            key=f"audio_input_{st.session_state.audio_sequence}",
+        )
+        if recording is not None:
+            audio_bytes = recording.getvalue()
+            audio_hash = hashlib.sha256(audio_bytes).hexdigest()
+            if audio_hash != st.session_state.last_processed_audio:
+                st.session_state.last_processed_audio = audio_hash
+                st.session_state.app_state = "RESPONDING"
+                with st.spinner("말씀을 듣고 답변을 준비하고 있어요."):
+                    try:
+                        process_recording(audio_bytes)
+                    except APIError:
+                        LOGGER.exception("Groq request failed")
+                        st.session_state.error_message = (
+                            "AI 서비스에 연결하지 못했습니다. API 키와 네트워크를 확인해 주세요."
+                        )
+                        st.session_state.app_state = "ERROR"
+                st.rerun()
+        if st.session_state.app_state == "LISTENING" and st.button(
+            "⏸️ 듣기 종료하고 대기 모드로 전환",
+            key="end_listening",
+        ):
+            st.session_state.standby_audio = synthesize_speech(TIMEOUT_STANDBY)
+            st.session_state.listening_started_at = None
+            st.session_state.app_state = "STANDBY"
             st.rerun()
 elif st.session_state.app_state == "RESPONDING":
     st.markdown(f"### {st.session_state.response_text}")
